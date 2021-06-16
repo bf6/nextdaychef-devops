@@ -1,0 +1,44 @@
+# aws cloudformation update-stack \
+#   --stack-name staging-elasticache-nextdaychef \
+#   --template-body file://ops/cloudformation/templates/32_elasticache.yml \
+#   --parameters file://ops/cloudformation/parameters/staging.json
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NextDayChef Infrastructure Stack: Elasticache Cluster"
+
+Parameters:
+  Env:
+    Description: Type of environment
+    ConstraintDescription: Must be "staging" or "production"
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+  VPCAddress:
+    Description: VPC CIDR Block
+    Type: String
+
+Resources:
+  AppElasticacheCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      CacheNodeType: cache.t2.micro
+      CacheSubnetGroupName:
+        Fn::ImportValue: !Sub
+          - "${env}-ElastiCacheSubnetGroupName"
+          - { env: !Ref Env }
+      ClusterName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - elasticache
+          - cluster
+      Engine: "redis"
+      NumCacheNodes: 1
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+      VpcSecurityGroupIds:
+        - Fn::ImportValue: !Sub
+            - "${env}-ElastiCacheSecurityGroupId"
+            - { env: !Ref Env }

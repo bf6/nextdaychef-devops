@@ -1,0 +1,250 @@
+# aws cloudformation update-stack \
+#   --stack-name staging-vpc-nextdaychef \
+#   --template-body file://ops/cloudformation/templates/10_vpc.yml \
+#   --parameters file://ops/cloudformation/parameters/staging.json
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NextDayChef Infrastructure Stack: VPC and Subnets Layer"
+
+Parameters:
+  Env:
+    Description: Type of environment
+    ConstraintDescription: Must be "staging" or "production"
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+  VPCAddress:
+    Description: VPC CIDR Block
+    Type: String
+
+Mappings:
+  CIDRBlock:
+    staging:
+      value: 172.21.0.0/16
+    production:
+      value: 172.22.0.0/16
+
+Resources:
+  AppVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap
+        - CIDRBlock
+        - !Ref Env
+        - value
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Ref Env
+              - nextdaychef
+              - vpc
+
+  AppInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub
+            - "${env}-internet-gateway"
+            - { env: !Ref Env }
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: AppVPC
+      InternetGatewayId:
+        Ref: AppInternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref AppVPC
+      Tags:
+        - Key: Name
+          Value: Public Routes
+        - Key: Environment
+          Value: !Ref Env
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref AppInternetGateway
+
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: "us-east-1a"
+      VpcId: !Ref AppVPC
+      CidrBlock: !Select [0, !Cidr [!Ref VPCAddress, 8, 8]]
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: "us-east-1b"
+      VpcId: !Ref AppVPC
+      CidrBlock:
+        !Select [1, !Cidr [!FindInMap [CIDRBlock, !Ref Env, value], 8, 8]]
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  AppSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: "us-east-1c"
+      VpcId: !Ref AppVPC
+      CidrBlock:
+        !Select [2, !Cidr [!FindInMap [CIDRBlock, !Ref Env, value], 8, 8]]
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  AppSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref AppSubnetA
+
+  AppSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref AppSubnetB
+
+  AppSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref AppSubnetC
+
+  DBSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: "us-east-1a"
+      VpcId: !Ref AppVPC
+      CidrBlock:
+        !Select [3, !Cidr [!FindInMap [CIDRBlock, !Ref Env, value], 8, 8]]
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+  DBSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: "us-east-1b"
+      VpcId: !Ref AppVPC
+      CidrBlock:
+        !Select [4, !Cidr [!FindInMap [CIDRBlock, !Ref Env, value], 8, 8]]
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+  DBSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: "us-east-1c"
+      VpcId: !Ref AppVPC
+      CidrBlock:
+        !Select [5, !Cidr [!FindInMap [CIDRBlock, !Ref Env, value], 8, 8]]
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  ElastiCacheSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: "us-east-1b"
+      VpcId: !Ref AppVPC
+      CidrBlock:
+        !Select [6, !Cidr [!FindInMap [CIDRBlock, !Ref Env, value], 8, 8]]
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnet group for NextDayChef DB"
+      DBSubnetGroupName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - sg
+          - group
+      SubnetIds:
+        - !Ref DBSubnetA
+        - !Ref DBSubnetB
+        - !Ref DBSubnetC
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  ElastiCacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - elasticache
+          - sg
+          - group
+      Description: "Subnet group for NextDayChef ElastiCache Cluster"
+      SubnetIds:
+        - !Ref ElastiCacheSubnetA
+
+Outputs:
+  AppVpcId:
+    Description: "The id of the app VPC"
+    Value: !Ref AppVPC
+    Export:
+      Name: !Sub
+        - "${env}-AppVpcId"
+        - { env: !Ref Env }
+  AppSubnetAId:
+    Description: "The id of the App Subnet A"
+    Value: !Ref AppSubnetA
+    Export:
+      Name: !Sub
+        - "${env}-AppSubnetAId"
+        - { env: !Ref Env }
+  AppSubnetBId:
+    Description: "The id of the App Subnet B"
+    Value: !Ref AppSubnetB
+    Export:
+      Name: !Sub
+        - "${env}-AppSubnetBId"
+        - { env: !Ref Env }
+  AppSubnetCId:
+    Description: "The id of the App Subnet C"
+    Value: !Ref AppSubnetC
+    Export:
+      Name: !Sub
+        - "${env}-AppSubnetCId"
+        - { env: !Ref Env }
+  DBSubnetGroupName:
+    Description: "The name of the DB Subnet Group"
+    Value: !Ref DBSubnetGroup
+    Export:
+      Name: !Sub
+        - "${env}-DBSubnetGroupName"
+        - { env: !Ref Env }
+  ElastiCacheSubnetGroupName:
+    Description: "The name of the ElastiCache Subnet Group"
+    Value: !Ref ElastiCacheSubnetGroup
+    Export:
+      Name: !Sub
+        - "${env}-ElastiCacheSubnetGroupName"
+        - { env: !Ref Env }

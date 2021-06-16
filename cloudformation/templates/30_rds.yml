@@ -1,0 +1,60 @@
+# aws cloudformation update-stack \
+#   --stack-name staging-db-nextdaychef \
+#   --template-body file://ops/cloudformation/templates/30_rds.yml \
+#   --parameters file://ops/cloudformation/parameters/staging.json
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NextDayChef Infrastructure Stack: RDS Instance"
+
+Parameters:
+  Env:
+    Description: Type of environment
+    ConstraintDescription: Must be "staging" or "production"
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+  VPCAddress:
+    Description: VPC CIDR Block
+    Type: String
+
+Mappings:
+  DBPassword:
+    staging:
+      SsmKey: staging-nextdaychef-postgres-password
+    production:
+      SsmKey: production-nextdaychef-postgres-password
+
+Resources:
+  AppDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: "20"
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      DBInstanceClass: db.t2.micro
+      DBInstanceIdentifier: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - db
+      DBName: nextdaychef
+      DBSubnetGroupName:
+        Fn::ImportValue: !Sub
+          - "${env}-DBSubnetGroupName"
+          - { env: !Ref Env }
+      Engine: postgres
+      EngineVersion: "12.5"
+      MasterUserPassword: !Sub
+        - "{{resolve:ssm-secure:${key}:1}}"
+        - { key: !FindInMap [DBPassword, !Ref Env, SsmKey] }
+      MasterUsername: nextdaychef
+      Port: "5432"
+      PubliclyAccessible: false
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+      VPCSecurityGroups:
+        - Fn::ImportValue: !Sub
+            - "${env}-DBSecurityGroupId"
+            - { env: !Ref Env }

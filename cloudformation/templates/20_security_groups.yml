@@ -1,0 +1,176 @@
+# aws cloudformation update-stack \
+#   --stack-name staging-security-groups-nextdaychef \
+#   --template-body file://ops/cloudformation/templates/20_security_groups.yml \
+#   --parameters file://ops/cloudformation/parameters/staging.json
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NextDayChef Infrastructure Stack: Security Groups"
+
+Parameters:
+  Env:
+    Description: Type of environment
+    ConstraintDescription: Must be "staging" or "production"
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+  VPCAddress:
+    Description: VPC CIDR Block
+    Type: String
+
+Resources:
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Allows SSH Access for Brian, HTTP/HTTPS from outside world, and Postgress access from within."
+      GroupName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - app
+          - sg
+      SecurityGroupIngress:
+        - Description: "HTTP Access from outside world"
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: "HTTP Access from outside world"
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: ::/0
+        - Description: "HTTPS Access from outside world"
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - Description: "HTTPS Access from outside world"
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIpv6: ::/0
+        - Description: "SSH Access from Brians Home"
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 96.250.203.237/32
+      VpcId:
+        Fn::ImportValue: !Sub
+          - "${env}-AppVpcId"
+          - { env: !Ref Env }
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Allows SSH Access for Brian"
+      GroupName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - worker
+          - sg
+      SecurityGroupIngress:
+        - Description: "SSH Access from Brians Home"
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 96.250.203.237/32
+      VpcId:
+        Fn::ImportValue: !Sub
+          - "${env}-AppVpcId"
+          - { env: !Ref Env }
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Allows Postgres Access from App"
+      GroupName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - db
+          - sg
+      SecurityGroupIngress:
+        - Description: "Postgres Access from App Security Group"
+          IpProtocol: "tcp"
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !GetAtt AppSecurityGroup.GroupId
+        - Description: "Postgres Access from Worker Security Group"
+          IpProtocol: "tcp"
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !GetAtt WorkerSecurityGroup.GroupId
+      VpcId:
+        Fn::ImportValue: !Sub
+          - "${env}-AppVpcId"
+          - { env: !Ref Env }
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  ElastiCacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Allows Redis Access from App"
+      GroupName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+          - elasticache
+          - sg
+      SecurityGroupIngress:
+        - Description: "Redis Access from App Security Group"
+          IpProtocol: "tcp"
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !GetAtt AppSecurityGroup.GroupId
+        - Description: "Redis Access from Worker Security Group"
+          IpProtocol: "tcp"
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !GetAtt WorkerSecurityGroup.GroupId
+      VpcId:
+        Fn::ImportValue: !Sub
+          - "${env}-AppVpcId"
+          - { env: !Ref Env }
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+Outputs:
+  AppSecurityGroupId:
+    Description: "The id of the App Security Group"
+    Value: !GetAtt AppSecurityGroup.GroupId
+    Export:
+      Name: !Sub
+        - "${env}-AppSecurityGroupId"
+        - { env: !Ref Env }
+  DBSecurityGroupId:
+    Description: "The id of the DB Security Group"
+    Value: !GetAtt DBSecurityGroup.GroupId
+    Export:
+      Name: !Sub
+        - "${env}-DBSecurityGroupId"
+        - { env: !Ref Env }
+  WorkerSecurityGroupId:
+    Description: "The id of the Worker Security Group"
+    Value: !GetAtt WorkerSecurityGroup.GroupId
+    Export:
+      Name: !Sub
+        - "${env}-WorkerSecurityGroupId"
+        - { env: !Ref Env }
+  ElastiCacheSecurityGroupId:
+    Description: "The id of the ElastiCache Security Group"
+    Value: !GetAtt ElastiCacheSecurityGroup.GroupId
+    Export:
+      Name: !Sub
+        - "${env}-ElastiCacheSecurityGroupId"
+        - { env: !Ref Env }

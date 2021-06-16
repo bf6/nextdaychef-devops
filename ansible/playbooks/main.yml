@@ -1,0 +1,132 @@
+# To DEPLOY:
+# ansible-playbook -i ops/ansible/inventory/staging/hosts.yml ops/ansible/playbooks/main.yml
+
+---
+- hosts: all
+  name: Deployment and Provisioning Playbook
+  environment: "{{ env_vars }}"
+  tags: app
+
+  tasks:
+    - name: Update repositories cache
+      become: yes
+      apt:
+        update_cache: yes
+
+    - name: Install system packages
+      become: yes
+      apt:
+        pkg:
+          - nginx
+          - python3-pip
+          - libpq-dev
+          - postgresql-client-12
+
+    - name: Clone NextDayChef repo to app server
+      git:
+        repo: "git@github.com:bf6/nextdaychef.git"
+        version: "{{ git_branch | default('main') }}"
+        dest: /home/ubuntu/nextdaychef
+        update: yes
+        ssh_opts: "-o ForwardAgent=yes"
+
+    - name: Create ~/log/celery if it doesn't exist
+      file:
+        path: /home/ubuntu/log/celery
+        state: directory
+
+    - name: Create ~/log/gunicorn if it doesn't exist
+      file:
+        path: /home/ubuntu/log/gunicorn
+        state: directory
+
+    - name: Create ~/log/nginx if it doesn't exist
+      file:
+        path: /home/ubuntu/log/nginx
+        state: directory
+
+    - name: Create ~/log/supervisor if it doesn't exist
+      file:
+        path: /home/ubuntu/log/supervisor
+        state: directory
+
+    - name: Install virtualenv via pip
+      become: yes
+      pip:
+        name: virtualenv
+        executable: pip3
+
+    - name: Install pip dependencies
+      pip:
+        requirements: /home/ubuntu/nextdaychef/api/requirements.txt
+        virtualenv: /home/ubuntu/nextdaychef/venv
+
+- hosts: appservers
+  name: Start web services
+  environment: "{{ env_vars }}"
+
+  tasks:
+    - name: Delete default nginx config
+      become: yes
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Copy app nginx config
+      become: yes
+      copy:
+        src: /home/ubuntu/nextdaychef/ops/nginx/nextdaychef.conf
+        dest: /etc/nginx/sites-available
+        remote_src: yes
+
+    - name: Symlink config file to sites-enabled
+      become: yes
+      file:
+        src: /etc/nginx/sites-available/nextdaychef.conf
+        dest: /etc/nginx/sites-enabled/nextdaychef.conf
+        state: link
+        force: yes
+
+    - name: Run migrations
+      community.general.django_manage:
+        command: migrate
+        project_path: /home/ubuntu/nextdaychef/api
+        virtualenv: /home/ubuntu/nextdaychef/venv
+
+    - name: Collect static
+      community.general.django_manage:
+        command: collectstatic
+        project_path: /home/ubuntu/nextdaychef/api
+        virtualenv: /home/ubuntu/nextdaychef/venv
+
+    - name: Restart Supervisor Daemon
+      command: "{{ item }}"
+      with_items:
+        - killall supervisord --wait
+        - /home/ubuntu/nextdaychef/venv/bin/supervisord -c /home/ubuntu/nextdaychef/ops/supervisor/supervisor.conf
+      ignore_errors: true
+
+    - name: Restart gunicorn
+      command: /home/ubuntu/nextdaychef/venv/bin/supervisorctl restart gunicorn
+
+    - name: Restart nginx
+      become: yes
+      service:
+        name: nginx
+        state: restarted
+
+- hosts: appworkers
+  name: Start Celery workers
+  environment: "{{ env_vars }}"
+  tags: worker
+
+  tasks:
+    - name: Restart Supervisor Daemon
+      command: "{{ item }}"
+      with_items:
+        - killall supervisord --wait
+        - /home/ubuntu/nextdaychef/venv/bin/supervisord -c /home/ubuntu/nextdaychef/ops/supervisor/supervisor.conf
+      ignore_errors: true
+
+    - name: Restart celery
+      command: /home/ubuntu/nextdaychef/venv/bin/supervisorctl restart celery:*

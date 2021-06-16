@@ -1,0 +1,10 @@
+[
+  {
+    "ParameterKey": "Env",
+    "ParameterValue": "staging"
+  },
+  {
+    "ParameterKey": "VPCAddress",
+    "ParameterValue": "172.21.0.0/16"
+  }
+]

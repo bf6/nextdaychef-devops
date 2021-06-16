@@ -1,0 +1,97 @@
+# aws cloudformation update-stack \
+#   --stack-name staging-alb-nextdaychef \
+#   --template-body file://ops/cloudformation/templates/50_alb.yml \
+#   --parameters file://ops/cloudformation/parameters/staging.json
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NextDayChef Infrastructure Stack: ALB & Target Groups"
+
+Parameters:
+  Env:
+    Description: Type of environment
+    ConstraintDescription: Must be "staging" or "production"
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+  VPCAddress:
+    Description: VPC CIDR Block
+    Type: String
+
+Mappings:
+  DomainPathMap:
+    staging:
+      Path: staging
+    production:
+      Path: api
+
+Resources:
+  AppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub
+        - "${env}-alb"
+        - { env: !Ref Env }
+      Scheme: "internet-facing"
+      SecurityGroups:
+        - Fn::ImportValue: !Sub
+            - "${env}-AppSecurityGroupId"
+            - { env: !Ref Env }
+      Subnets:
+        - Fn::ImportValue: !Sub
+            - "${env}-AppSubnetAId"
+            - { env: !Ref Env }
+        - Fn::ImportValue: !Sub
+            - "${env}-AppSubnetBId"
+            - { env: !Ref Env }
+        - Fn::ImportValue: !Sub
+            - "${env}-AppSubnetCId"
+            - { env: !Ref Env }
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+      Type: "application"
+
+  AppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckPath: "/health/"
+      Name: !Sub
+        - "${env}-app-target-group"
+        - { env: !Ref Env }
+      Port: 80
+      Protocol: HTTP
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+      TargetType: "instance"
+      VpcId:
+        Fn::ImportValue: !Sub
+          - "${env}-AppVpcId"
+          - { env: !Ref Env }
+
+  AppLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+        - CertificateArn: arn:aws:acm:us-east-1:370885964780:certificate/f01f3292-fc1d-42ad-93bc-bce721d676b2
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTargetGroup
+      LoadBalancerArn: !Ref AppLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+
+  ALBDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: Z09751732R95YOMEL8WKP
+      Name: !Join
+        - "."
+        - - !FindInMap [DomainPathMap, !Ref Env, Path]
+          - "nextdaychef.app"
+      AliasTarget:
+        DNSName: !GetAtt AppLoadBalancer.DNSName
+        HostedZoneId: !GetAtt AppLoadBalancer.CanonicalHostedZoneID
+      Type: A

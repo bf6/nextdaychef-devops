@@ -1,0 +1,113 @@
+# aws cloudformation update-stack \
+#   --stack-name staging-app-nextdaychef \
+#   --template-body file://ops/cloudformation/templates/40_ec2.yml \
+#   --parameters file://ops/cloudformation/parameters/staging.json
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NextDayChef Infrastructure Stack: EC2 MainApp Instance(s)"
+
+Parameters:
+  Env:
+    Description: Type of environment
+    ConstraintDescription: Must be "staging" or "production"
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+  VPCAddress:
+    Description: VPC CIDR Block
+    Type: String
+
+Mappings:
+  EnvToAMI:
+    staging:
+      # 12/25/2020 NextDayChef App Server
+      ami: ami-0b363f06a7cc26871
+    production:
+      # Ubuntu Server 20.04 LTS (HVM), SSD Volume Type x86
+      ami: ami-0885b1f6bd170450c
+
+Resources:
+  AppInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile:
+        Fn::ImportValue: !Sub
+          - "${env}-S3AccessIamInstanceProfileId"
+          - { env: !Ref Env }
+      ImageId: !FindInMap [EnvToAMI, !Ref Env, ami]
+      InstanceType: "t2.micro"
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub
+            - "${env}-AppSecurityGroupId"
+            - { env: !Ref Env }
+      SubnetId:
+        Fn::ImportValue: !Sub
+          - "${env}-AppSubnetBId"
+          - { env: !Ref Env }
+      KeyName: "NextDayChef-Development"
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Ref Env
+              - nextdaychef
+              - app
+              - "01"
+      Tenancy: "default"
+
+  WorkerInstance01:
+    Type: AWS::EC2::Instance
+    Properties:
+      IamInstanceProfile:
+        Fn::ImportValue: !Sub
+          - "${env}-S3AccessIamInstanceProfileId"
+          - { env: !Ref Env }
+      ImageId: !FindInMap [EnvToAMI, !Ref Env, ami]
+      InstanceType: "t2.micro"
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub
+            - "${env}-WorkerSecurityGroupId"
+            - { env: !Ref Env }
+      SubnetId:
+        Fn::ImportValue: !Sub
+          - "${env}-AppSubnetBId"
+          - { env: !Ref Env }
+      KeyName: "NextDayChef-Development"
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+        - Key: Name
+          Value: !Join
+            - "-"
+            - - !Ref Env
+              - nextdaychef
+              - worker
+              - "01"
+      Tenancy: "default"
+
+  AppInstance01Address:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref AppInstance
+
+  AssociateEIPWithAppInstance01:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref AppInstance
+      AllocationId: !GetAtt AppInstance01Address.AllocationId
+
+  WorkerInstance01Address:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref WorkerInstance01
+
+  AssociateEIPWithWorkerInstance01:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref WorkerInstance01
+      AllocationId: !GetAtt WorkerInstance01Address.AllocationId

@@ -1,0 +1,111 @@
+# aws cloudformation update-stack \
+#   --stack-name staging-s3-nextdaychef \
+#   --template-body file://ops/cloudformation/templates/35_s3.yml \
+#   --parameters file://ops/cloudformation/parameters/staging.json \
+#   --capabilities CAPABILITY_NAMED_IAM
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "NextDayChef Infrastructure Stack: S3"
+
+Parameters:
+  Env:
+    Description: Type of environment
+    ConstraintDescription: Must be "staging" or "production"
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+  VPCAddress:
+    Description: VPC CIDR Block
+    Type: String
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      BucketName: !Join
+        - "-"
+        - - !Ref Env
+          - nextdaychef
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  S3AccessIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Description: "Allows NextDayChef EC2 App Instances to access S3 Bucket"
+      Policies:
+        - PolicyName: RootBucketAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  - !GetAtt S3Bucket.Arn
+                  - !Sub
+                    - "${arn}/*"
+                    - { arn: !GetAtt S3Bucket.Arn }
+      RoleName: !Join
+        - "-"
+        - - !Ref Env
+          - S3AccessRole
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  S3AccessIamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub
+        - "${env}-iam-instance-profile"
+        - { env: !Ref Env }
+      Roles:
+        - !Ref S3AccessIAMRole
+
+  ExternalS3IamUser:
+    Type: AWS::IAM::User
+    Properties:
+      Policies:
+        - PolicyName: ExternalBucketAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  - !GetAtt S3Bucket.Arn
+                  - !Sub
+                    - "${arn}/classmedia/*"
+                    - { arn: !GetAtt S3Bucket.Arn }
+      UserName: !Sub
+        - "${env}-external-iam-s3-user"
+        - { env: !Ref Env }
+
+Outputs:
+  S3AccessIamInstanceProfileId:
+    Description: "Id for EC2 Iam Instance Profile"
+    Value: !Ref S3AccessIamInstanceProfile
+    Export:
+      Name: !Sub
+        - "${env}-S3AccessIamInstanceProfileId"
+        - { env: !Ref Env }
